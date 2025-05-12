@@ -1,0 +1,17 @@
+{
+  "name": "prisma-bun-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "bunx prisma generate",
+    "migrate": "bunx prisma migrate dev --name init",
+    "seed": "bun run index.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "latest",
+    "@prisma/adapter-bun": "link:../../"
+  },
+  "devDependencies": {
+    "prisma": "latest"
+  }
+} 
