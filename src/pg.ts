@@ -16,7 +16,6 @@ import { Debug, DriverAdapterError } from '@prisma/driver-adapter-utils'
 // @ts-ignore: this is used to avoid the `Module '"<path>/node_modules/@types/pg/index"' has no default export.` error.
 import pg from 'pg'
 
-import { name as packageName } from '../package.json'
 import { customParsers, fieldToColumnType, fixArrayBufferValues, UnsupportedNativeDataType } from './conversion'
 import { convertDriverError } from './errors'
 
@@ -29,7 +28,7 @@ type TransactionClient = pg.PoolClient
 
 class PgQueryable<ClientT extends StdClient | TransactionClient> implements SqlQueryable {
   readonly provider = 'postgres'
-  readonly adapterName = packageName
+  readonly adapterName = "prisma-bun"
 
   constructor(protected readonly client: ClientT) {}
 
