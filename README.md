@@ -1,18 +1,16 @@
-# @prisma/adapter-pg
+# @prisma/adapter-bun
 
-This package contains the driver adapter for Prisma ORM that enables usage of the [`node-postgres`](https://node-postgres.com/) (`pg`) database driver for PostgreSQL. You can learn more in the [documentation](https://pris.ly/d/adapter-pg).
+This package contains a driver adapter for Prisma ORM that enables usage of Bun's native `bun:sqlite` / SQL primitives (via `Bun.sql`) to communicate with a PostgreSQL database. This means you can run Prisma entirely inside the Bun runtime **without any Node-specific drivers**.
 
-`pg` is one of the most popular drivers in the JavaScript ecosystem for PostgreSQL databases. It can be used with any PostgreSQL database that's accessed via TCP.
-
-> **Note:**: Support for the `pg` driver is available from Prisma versions [5.4.2](https://github.com/prisma/prisma/releases/tag/5.4.2) and later.
+> **Note:** Support for driver adapters is available in Prisma versions ≥ 5.4.2 through the `driverAdapters` Preview feature flag.
 
 ## Usage
 
-This section explains how you can use it with Prisma ORM and the `@prisma/adapter-pg` driver adapter. Be sure that the `DATABASE_URL` environment variable is set to your PostgreSQL connection string (e.g. in a `.env` file).
+The following steps show how to use the `@prisma/adapter-bun` driver adapter with Prisma. Make sure the `DATABASE_URL` environment variable contains your PostgreSQL connection string (e.g. in a `.env` file).
 
 ### 1. Enable the `driverAdapters` Preview feature flag
 
-Since driver adapters are currently in [Preview](/orm/more/releases#preview), you need to enable its feature flag on the `datasource` block in your Prisma schema:
+Add the flag to the `generator` section in your Prisma schema:
 
 ```prisma
 // schema.prisma
@@ -27,37 +25,40 @@ datasource db {
 }
 ```
 
-Once you have added the feature flag to your schema, re-generate Prisma Client:
+Afterwards, re-generate Prisma Client:
 
-```
-npx prisma generate
-```
-
-### 2. Install the dependencies
-
-Next, install the `pg` package and Prisma ORM's driver adapter:
-
-```
-npm install pg
-npm install @prisma/adapter-pg
+```bash
+bunx prisma generate
 ```
 
-### 3. Instantiate Prisma Client using the driver adapter
+### 2. Install the dependency
 
-Finally, when you instantiate Prisma Client, you need to pass an instance of Prisma ORM's driver adapter to the `PrismaClient` constructor:
+Add the Bun adapter package to your project:
+
+```bash
+bun add @prisma/adapter-bun
+```
+
+_No additional database driver is required — Bun ships its own SQL client._
+
+### 3. Instantiate Prisma Client using the adapter
+
+Create your Prisma Client instance and pass the adapter in the constructor:
 
 ```ts
-import { PrismaPg } from '@prisma/adapter-pg'
+import { sql } from 'bun'
+import { PrismaBun } from '@prisma/adapter-bun'
 import { PrismaClient } from '@prisma/client'
 
-const connectionString = `${process.env.DATABASE_URL}`
+// Option 1 – use an existing Bun.sql instance
+const adapter = new PrismaBun(sql)
 
-const adapter = new PrismaPg({ connectionString })
+// Option 2 – let the adapter create its own connection by providing a connection string
+// const adapter = new PrismaBun(undefined, { connectionString: process.env.DATABASE_URL })
+
 const prisma = new PrismaClient({ adapter })
 ```
 
-## Feedback
+## Feedback & Issues
 
-We encourage you to create an issue if you find something missing or run into a bug.
-
-If you have any feedback, leave a comment in [this GitHub discussion](https://github.com/prisma/prisma/discussions/22899).
+Found a bug or have feedback? Please open an issue in this repository.

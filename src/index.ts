@@ -1,1 +1,1 @@
-export { PrismaPgAdapterFactory as PrismaPg } from './pg'
+export { PrismaBunAdapterFactory as PrismaBun } from './bun-sql'
