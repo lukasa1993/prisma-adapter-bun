@@ -1,17 +1,34 @@
 {
-  "extends": "./tsconfig.utils.typecheck.json",
-  "include": ["./**/*", ".eslintrc.js"],
-  // same list as in tsconfig.regular.json, minus extra test exclusion and sandbox
-  "exclude": [
-    "**/dist",
-    "**/build",
-    "**/fixtures",
-    "**/node_modules",
-    "**/.prisma/client",
-    "./packages/cli/preinstall",
-    "./packages/cli/prisma-client",
-    "./packages/client/runtime",
-    "./packages/client/declaration",
-    "./packages/client/generator-build"
-  ]
+  "include": [
+    "worker-configuration.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    "**/.server/**/*.ts",
+    "**/.server/**/*.tsx",
+    "**/.client/**/*.ts",
+    "**/.client/**/*.tsx",
+    ".react-router/types/**/*"
+  ],
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "lib": ["DOM", "DOM.Iterable", "ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "target": "ES2022",
+
+    "baseUrl": ".",
+    "paths": {
+      "~/*": ["./src/*"]
+    },
+    "allowJs": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "noUncheckedIndexedAccess": true,
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "verbatimModuleSyntax": true
+  }
 }

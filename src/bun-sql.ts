@@ -29,7 +29,7 @@ const debug = Debug("prisma:driver-adapter:bun");
 
 function guessColumnTypes(rows: Record<string, unknown>[]): ColumnType[] {
   if (!rows.length) return [];
-  const names = Object.keys(rows[0]);
+  const names = Object.keys((rows as unknown as string[])[0] ?? {});
   const colTypes: ColumnType[] = [];
   for (const n of names) {
     let sample: unknown = undefined;
@@ -68,7 +68,9 @@ class PgQueryable<ClientT extends StdClient | TransactionClient>
       string,
       unknown
     >[];
-    const columnNames = objectRows.length ? Object.keys(objectRows[0]) : [];
+    const columnNames = objectRows.length
+      ? Object.keys(objectRows[0] ?? {})
+      : [];
     let columnTypes: ColumnType[] = [];
     try {
       columnTypes = guessColumnTypes(objectRows);
