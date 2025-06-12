@@ -2,45 +2,18 @@
   "name": "@prisma/adapter-bun",
   "version": "1.0.0",
   "description": "Prisma's driver adapter for \"bun\"",
-  "main": "dist/index.js",
-  "module": "dist/index.mjs",
-  "types": "dist/index.d.ts",
-  "exports": {
-    ".": {
-      "require": {
-        "types": "./dist/index.d.ts",
-        "default": "./dist/index.js"
-      },
-      "import": {
-        "types": "./dist/index.d.mts",
-        "default": "./dist/index.mjs"
-      }
-    }
-  },
+  "main": "src/index.ts",
   "repository": {
     "type": "git",
-    "url": "https://github.com/prisma/prisma.git",
-    "directory": "packages/adapter-bun"
+    "url": "https://github.com/lukasa1993/prisma-adapter-bun.git"
   },
-  "scripts": {
-    "dev": "DEV=true tsx helpers/build.ts",
-    "build": "tsx helpers/build.ts",
-    "test": "jest"
-  },
-  "files": ["dist", "README.md"],
-  "keywords": [],
-  "author": "Tom Houlé <houle@prisma.io>",
+  "files": ["src", "README.md"],
+  "keywords": ["prisma", "adapter", "bun"],
   "license": "Apache-2.0",
-  "sideEffects": false,
   "dependencies": {
-    "@prisma/driver-adapter-utils": "*",
-    "postgres-array": "3.0.4"
+    "@prisma/driver-adapter-utils": "*"
   },
   "devDependencies": {
-    "@swc/core": "1.11.5",
-    "@swc/jest": "0.2.37",
-    "jest": "29.7.0",
-    "jest-junit": "16.0.0",
     "@types/bun": "*"
   }
 }
