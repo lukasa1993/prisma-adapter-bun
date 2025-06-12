@@ -1,8 +1,9 @@
-import { sql as bunSql, SQL } from 'bun'
-import {
-  ColumnTypeEnum,
-  Debug,
-  DriverAdapterError,
+/* eslint-disable @typescript-eslint/require-await */
+
+import type {
+  ColumnType,
+  ConnectionInfo,
+  IsolationLevel,
   SqlDriverAdapter,
   SqlMigrationAwareDriverAdapterFactory,
   SqlQuery,
@@ -10,180 +11,214 @@ import {
   SqlResultSet,
   Transaction,
   TransactionOptions,
-  ConnectionInfo,
-} from '@prisma/driver-adapter-utils'
+} from "@prisma/driver-adapter-utils";
+import {
+  ColumnTypeEnum,
+  Debug,
+  DriverAdapterError,
+} from "@prisma/driver-adapter-utils";
 
-// Minimal, best-effort mapping. All columns default to Text for now
-const DEFAULT_COLUMN_TYPE = ColumnTypeEnum.Text
+import { SQL } from "bun";
+import type { ReservedSQL } from "bun";
 
-const debug = Debug('prisma:driver-adapter:bun-sql')
+import { name as packageName } from "../package.json";
+import { UnsupportedNativeDataType, fieldToColumnType } from "./conversion";
+import { convertDriverError } from "./errors";
 
-/**
- * Wraps a Bun.sql instance (or bun SQL transaction instance) to expose the
- * SqlQueryable API expected by the Prisma driver-adapter utils.
- */
-class BunQueryable implements SqlQueryable {
-  readonly provider = 'postgres'
-  readonly adapterName = 'prisma-adapter-bun'
+const debug = Debug("prisma:driver-adapter:bun");
 
-  constructor(private readonly client: typeof bunSql | SQL) {}
+function guessColumnTypes(rows: Record<string, unknown>[]): ColumnType[] {
+  if (!rows.length) return [];
+  const names = Object.keys(rows[0]);
+  const colTypes: ColumnType[] = [];
+  for (const n of names) {
+    let sample: unknown = undefined;
+    for (const r of rows) {
+      if (r[n] !== null && r[n] !== undefined) {
+        sample = r[n];
+        break;
+      }
+    }
+    try {
+      // @ts-expect-error we can't know the OID – delegate
+      colTypes.push(fieldToColumnType(sample));
+    } catch {
+      colTypes.push(ColumnTypeEnum.Text);
+    }
+  }
+  return colTypes;
+}
+
+type StdClient = SQL;
+type TransactionClient = ReservedSQL;
+
+class PgQueryable<ClientT extends StdClient | TransactionClient>
+  implements SqlQueryable
+{
+  readonly provider = "postgres";
+  readonly adapterName = packageName;
+
+  constructor(protected readonly client: ClientT) {}
 
   async queryRaw(query: SqlQuery): Promise<SqlResultSet> {
-    const tag = '[bun::query_raw]'
-    debug('%s %O', tag, query)
+    const tag = "[bun::query_raw]";
+    debug(`${tag} %O`, query);
 
-    const { sql, args } = query
-
+    const objectRows = (await this.performIO(query)) as Record<
+      string,
+      unknown
+    >[];
+    const columnNames = objectRows.length ? Object.keys(objectRows[0]) : [];
+    let columnTypes: ColumnType[] = [];
     try {
-      // Use Bun's unsafe helper so we can pass an already-built SQL string with
-      // parameter placeholders (e.g. $1, $2, ...).
-      // Bun will bind the provided args array for us.
-      const result = await (this.client as any /* Bun.sql instance */)
-        .unsafe(sql, args)
-        .all()
-
-      // `result` is an array of objects. Derive column names from the first
-      // row (if any) and then convert the objects into value arrays.
-      const columnNames =
-        result.length > 0 ? Object.keys(result[0]) : ([] as string[])
-
-      const rows = result.map((row: any) =>
-        columnNames.map((name) => (row as any)[name]),
-      )
-
-      const columnTypes = columnNames.map(() => DEFAULT_COLUMN_TYPE)
-
-      return {
-        columnNames,
-        columnTypes,
-        rows,
-      }
+      columnTypes = guessColumnTypes(objectRows);
     } catch (e) {
-      this.onError(e)
+      if (e instanceof UnsupportedNativeDataType) {
+        throw new DriverAdapterError({
+          kind: "UnsupportedNativeDataType",
+          type: e.type,
+        });
+      }
+      throw e;
     }
+
+    const rows: unknown[][] = objectRows.map((obj) =>
+      columnNames.map((name) => obj[name]),
+    );
+    return { columnNames, columnTypes, rows };
   }
 
   async executeRaw(query: SqlQuery): Promise<number> {
-    const tag = '[bun::execute_raw]'
-    debug('%s %O', tag, query)
+    const tag = "[bun::execute_raw]";
+    debug(`${tag} %O`, query);
+    // bun-sql   returns rows for DML and an empty array for DDL.
+    const res = (await this.performIO(query)) as unknown[];
+    return Array.isArray(res) ? res.length : 0;
+  }
 
-    const { sql, args } = query
-
+  private async performIO(query: SqlQuery): Promise<unknown> {
     try {
-      const execResult = await (this.client as any).unsafe(sql, args).execute()
-      // Bun.sql execute() resolves to the rows (array). It also attaches a
-      // `rowCount` property on the query object. Fallback to 0.
-      const rowCount: number = (execResult as any)?.rowCount ?? 0
-      return rowCount
+      // Bun's sql client supports positional parameters when using .unsafe
+      return await this.client.unsafe(query.sql, query.args);
     } catch (e) {
-      this.onError(e)
+      this.onError(e);
     }
   }
 
-  protected onError(error: any): never {
-    debug('Error in BunQueryable: %O', error)
-    throw new DriverAdapterError({
-      kind: 'GenericJs',
-      id: 0,
-    })
+  protected onError(error: unknown): never {
+    debug("Error in performIO: %O", error);
+    throw new DriverAdapterError(convertDriverError(error));
   }
 }
 
-class BunTransaction
-  extends BunQueryable
+class PgTransaction
+  extends PgQueryable<TransactionClient>
   implements Transaction
 {
-  constructor(private readonly tx: any, readonly options: TransactionOptions) {
-    super(tx)
+  constructor(
+    client: TransactionClient,
+    readonly options: TransactionOptions,
+  ) {
+    super(client);
   }
 
   async commit(): Promise<void> {
-    debug('[bun::commit]')
-    await this.tx.commit?.()
+    debug("[bun::commit]");
+    await this.client.flush();
+    this.client.release?.();
   }
 
   async rollback(): Promise<void> {
-    debug('[bun::rollback]')
-    await this.tx.rollback?.()
+    debug("[bun::rollback]");
+    await this.client.flush();
+    this.client.release?.();
   }
 }
 
-export interface PrismaBunOptions {
-  connectionString?: string
-  schema?: string
-}
+export type PrismaPgOptions = { schema?: string };
 
 export class PrismaBunAdapter
-  extends BunQueryable
+  extends PgQueryable<StdClient>
   implements SqlDriverAdapter
 {
-  private readonly sqlClient: typeof bunSql | SQL
-
-  constructor(client: typeof bunSql | SQL, private options?: PrismaBunOptions) {
-    super(client)
-    this.sqlClient = client
+  constructor(
+    client: StdClient,
+    private options?: PrismaPgOptions,
+    private readonly release?: () => Promise<void>,
+  ) {
+    super(client);
   }
 
-  async startTransaction(): Promise<Transaction> {
-    debug('[bun::startTransaction]')
-    // Note: Bun.sql.begin(...) currently returns the callback result, not a
-    // transaction-scoped sql instance. Instead we use `reserve()` which gives
-    // us an exclusive connection we can treat as a transaction client.
-    const reserved = await (this.sqlClient as any).reserve()
+  async startTransaction(
+    isolationLevel?: IsolationLevel,
+  ): Promise<Transaction> {
+    const options: TransactionOptions = { usePhantomQuery: false };
+    debug("[bun::startTransaction] options: %O", options);
 
-    return new BunTransaction(reserved, { usePhantomQuery: false })
+    // reserve an exclusive connection
+    const reserved = await this.client.reserve();
+    if (isolationLevel) {
+      await reserved.unsafe(
+        `SET TRANSACTION ISOLATION LEVEL ${isolationLevel}`,
+      );
+    }
+    await reserved`BEGIN`;
+    return new PgTransaction(reserved, options);
   }
 
   async executeScript(script: string): Promise<void> {
-    // Simple split by semi-colon; Bun.sql.simple() could also be used.
-    const statements = script.split(';').map((s) => s.trim()).filter(Boolean)
-    for (const stmt of statements) {
-      await (this.sqlClient as any).unsafe(stmt).execute()
+    for (const stmt of script
+      .split(";")
+      .map((s) => s.trim())
+      .filter(Boolean)) {
+      try {
+        await this.client.unsafe(stmt);
+      } catch (error) {
+        this.onError(error);
+      }
     }
   }
 
   getConnectionInfo(): ConnectionInfo {
-    return {
-      schemaName: this.options?.schema,
-    }
+    return { schemaName: this.options?.schema };
   }
 
   async dispose(): Promise<void> {
-    if (typeof (this.sqlClient as any).close === 'function') {
-      await (this.sqlClient as any).close()
-    }
+    await this.release?.();
+    await this.client.close();
   }
 }
 
 export class PrismaBunAdapterFactory
   implements SqlMigrationAwareDriverAdapterFactory
 {
-  readonly provider = 'postgres'
-  readonly adapterName = 'prisma-adapter-bun'
+  readonly provider = "postgres";
+  readonly adapterName = packageName;
 
-  constructor(private readonly options?: PrismaBunOptions) {}
+  constructor(
+    private readonly cfg: Record<string, unknown>,
+    private readonly options?: PrismaPgOptions,
+  ) {}
 
-  private createClient(): typeof bunSql | SQL {
-    if (this.options?.connectionString) {
-      return new SQL(this.options.connectionString)
-    }
-    return bunSql
+  private createSQL(overrides: Record<string, unknown> = {}): SQL {
+    return new SQL({ ...this.cfg, ...overrides });
   }
 
   async connect(): Promise<SqlDriverAdapter> {
-    const client = this.createClient()
-    return new PrismaBunAdapter(client, this.options)
+    return new PrismaBunAdapter(this.createSQL(), this.options, async () => {});
   }
 
   async connectToShadowDb(): Promise<SqlDriverAdapter> {
-    // Shadow DB support – create a transient DB name and drop after use.
-    const shadowName = `prisma_migrate_shadow_db_${globalThis.crypto.randomUUID()}`
-    const client = this.createClient()
+    const conn = await this.connect();
+    const database = `prisma_migrate_shadow_db_${globalThis.crypto.randomUUID()}`;
+    await conn.executeScript(`CREATE DATABASE "${database}"`);
 
-    await client.unsafe(`CREATE DATABASE "${shadowName}"`).execute()
-    const shadowConnString = `${this.options?.connectionString ?? ''}/${shadowName}`
-    const shadowClient = new SQL(shadowConnString)
-
-    return new PrismaBunAdapter(shadowClient, undefined)
+    return new PrismaBunAdapter(
+      this.createSQL({ database }),
+      undefined,
+      async () => {
+        await conn.executeScript(`DROP DATABASE "${database}"`);
+      },
+    );
   }
-} 
+}
